@@ -30,7 +30,7 @@ FROM base AS dependencies
 # Copiar package files
 COPY backend/package.json backend/package-lock.json* ./
 
-# Instalar dependências (npm install para compatibilidade)
+# Instalar dependências
 RUN npm install --omit=dev --legacy-peer-deps && \
     npm install fluent-ffmpeg @ffmpeg-installer/ffmpeg --legacy-peer-deps && \
     npm cache clean --force
@@ -49,15 +49,8 @@ COPY backend/package*.json ./
 # Copiar código fonte
 COPY backend/ .
 
-# Copiar certificados (se existirem)
-COPY certificates ./certs-temp 2>/dev/null || true
-
-# Executar script de certificados (se existir)
-RUN if [ -f copy_cert_assets.sh ]; then \
-        chmod +x copy_cert_assets.sh && \
-        ./copy_cert_assets.sh || true; \
-    fi && \
-    rm -rf ./certs-temp
+# Criar diretório de certificados
+RUN mkdir -p /app/certs
 
 # Build da aplicação TypeScript
 RUN npm run build
@@ -88,16 +81,12 @@ COPY --from=build /app/dist ./dist
 # Copiar arquivos necessários
 COPY --from=build /app/package*.json ./
 
-# Copiar certificados (se existirem)
-RUN mkdir -p /app/certs
-COPY --from=build /app/certs ./certs 2>/dev/null || true
+# Criar diretórios necessários
+RUN mkdir -p /app/certs /app/public
 
 # Copiar e preparar entrypoint
 COPY backend/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
-
-# Criar diretórios necessários
-RUN mkdir -p /app/public
 
 # Expor porta
 EXPOSE 3000
