@@ -1,0 +1,284 @@
+# ========================================
+# ATENDECHAT - DOCKER COMPOSE (EASYPANEL OTIMIZADO)
+# ========================================
+# Este arquivo é otimizado para deploy no Easypanel
+# Pode ser usado como referência ou para deploy local
+# ========================================
+
+version: '3.8'
+
+# ========================================
+# SERVICES
+# ========================================
+services:
+  
+  # ========================================
+  # POSTGRESQL (Banco de Dados)
+  # ========================================
+  postgres:
+    image: postgres:14-alpine
+    container_name: atendechat-postgres
+    restart: unless-stopped
+    
+    environment:
+      POSTGRES_DB: ${DB_NAME:-atendechat}
+      POSTGRES_USER: ${DB_USER:-atendechat}
+      POSTGRES_PASSWORD: ${DB_PASS:?Erro: DB_PASS não definido}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=pt_BR.UTF-8 --lc-ctype=pt_BR.UTF-8"
+      TZ: America/Sao_Paulo
+    
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+    networks:
+      - atendechat-network
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-atendechat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ========================================
+  # REDIS (Cache e Filas)
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: atendechat-redis
+    restart: unless-stopped
+    
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Erro: REDIS_PASSWORD não definido} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    
+    volumes:
+      - redis_data:/data
+    
+    networks:
+      - atendechat-network
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ========================================
+  # BACKEND (API)
+  # ========================================
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        STACK_NAME: ${STACK_NAME:-default}
+    
+    container_name: atendechat-backend
+    restart: unless-stopped
+    
+    environment:
+      # Node
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      
+      # URLs
+      BACKEND_URL: ${BACKEND_URL:?Erro: BACKEND_URL não definido}
+      FRONTEND_URL: ${FRONTEND_URL:?Erro: FRONTEND_URL não definido}
+      PROXY_PORT: 443
+      
+      # Database
+      DB_DIALECT: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-atendechat}
+      DB_PASS: ${DB_PASS:?Erro: DB_PASS não definido}
+      DB_NAME: ${DB_NAME:-atendechat}
+      
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:?Erro: JWT_SECRET não definido}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Erro: JWT_REFRESH_SECRET não definido}
+      
+      # Redis
+      REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379
+      REDIS_OPT_LIMITER_MAX: ${REDIS_OPT_LIMITER_MAX:-1}
+      REDIS_OPT_LIMITER_DURATION: ${REDIS_OPT_LIMITER_DURATION:-3000}
+      
+      # Limits
+      USER_LIMIT: ${USER_LIMIT:-10}
+      CONNECTIONS_LIMIT: ${CONNECTIONS_LIMIT:-10}
+      CLOSED_SEND_BY_ME: ${CLOSED_SEND_BY_ME:-true}
+      
+      # Campaigns
+      CAMPAIGN_RATE_LIMIT: ${CAMPAIGN_RATE_LIMIT:-10000}
+      CAMPAIGN_BATCH_SIZE: ${CAMPAIGN_BATCH_SIZE:-50}
+      
+      # Email (optional)
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-}
+      MAIL_USER: ${MAIL_USER:-}
+      MAIL_PASS: ${MAIL_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      
+      # Version
+      npm_package_version: 6.0.1
+    
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    
+    volumes:
+      - backend_public:/app/public
+    
+    networks:
+      - atendechat-network
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ========================================
+  # FRONTEND (Interface Web)
+  # ========================================
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ${BACKEND_URL}
+        REACT_APP_HOURS_CLOSE_TICKETS_AUTO: ${REACT_APP_HOURS_CLOSE_TICKETS_AUTO:-24}
+        STACK_NAME: ${STACK_NAME:-default}
+        REACT_APP_COLOR: ${REACT_APP_COLOR:-#682EE3}
+        REACT_APP_TAB_NAME: ${REACT_APP_TAB_NAME:-Atendechat}
+    
+    container_name: atendechat-frontend
+    restart: unless-stopped
+    
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+    
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    
+    networks:
+      - atendechat-network
+    
+    depends_on:
+      - backend
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+# ========================================
+# NETWORKS
+# ========================================
+networks:
+  atendechat-network:
+    driver: bridge
+    name: atendechat-network
+
+# ========================================
+# VOLUMES
+# ========================================
+volumes:
+  postgres_data:
+    name: atendechat-postgres-data
+  redis_data:
+    name: atendechat-redis-data
+  backend_public:
+    name: atendechat-backend-public
+
+# ========================================
+# INSTRUÇÕES DE USO
+# ========================================
+#
+# 1. Copie o arquivo .env.example para .env
+#    cp .env.example .env
+#
+# 2. Preencha todas as variáveis obrigatórias no .env
+#
+# 3. Inicie os serviços:
+#    docker-compose -f docker-compose.easypanel.yml up -d
+#
+# 4. Verifique os logs:
+#    docker-compose -f docker-compose.easypanel.yml logs -f
+#
+# 5. Parar os serviços:
+#    docker-compose -f docker-compose.easypanel.yml down
+#
+# 6. Parar e remover volumes:
+#    docker-compose -f docker-compose.easypanel.yml down -v
+#
+# ========================================
+# EASYPANEL
+# ========================================
+#
+# No Easypanel, você NÃO precisa deste arquivo!
+# O Easypanel gerencia tudo automaticamente.
+#
+# Este arquivo é útil para:
+# - Desenvolvimento local
+# - Testes antes do deploy
+# - Referência de configuração
+# - Deploy em outros ambientes Docker
+#
+# Para deploy no Easypanel:
+# Siga o guia: docs/01-EASYPANEL-SETUP.md
+#
+# ========================================
