@@ -80,6 +80,7 @@ COPY --from=build /app/dist ./dist
 
 # Copiar arquivos necessários
 COPY --from=build /app/package*.json ./
+COPY --from=build /app/.sequelizerc ./
 
 # Criar diretórios necessários
 RUN mkdir -p /app/certs /app/public
