@@ -1,9 +1,9 @@
 # =====================================================
 # ATENDECHAT FRONTEND - DOCKERFILE OTIMIZADO
-# Easypanel Ready | Multi-stage Build | npm
+# Easypanel Ready | Node 16 | react-scripts 3.x
 # =====================================================
 
-FROM node:20-alpine AS build
+FROM node:16-alpine AS build
 
 WORKDIR /app
 
@@ -64,7 +64,7 @@ RUN npm run build
 # =====================================================
 # STAGE 2: PRODUCTION
 # =====================================================
-FROM node:20-alpine AS production
+FROM node:16-alpine AS production
 
 WORKDIR /app
 
