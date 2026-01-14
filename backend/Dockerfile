@@ -27,15 +27,13 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 # =====================================================
 FROM base AS dependencies
 
-# Copiar apenas package files para cache otimizado
-COPY backend/package*.json ./
+# Copiar package files
+COPY backend/package.json backend/package-lock.json* ./
 
-# Instalar dependências (npm)
-RUN npm ci --only=production --legacy-peer-deps && \
+# Instalar dependências (npm install para compatibilidade)
+RUN npm install --omit=dev --legacy-peer-deps && \
+    npm install fluent-ffmpeg @ffmpeg-installer/ffmpeg --legacy-peer-deps && \
     npm cache clean --force
-
-# Instalar dependências específicas
-RUN npm install fluent-ffmpeg @ffmpeg-installer/ffmpeg --legacy-peer-deps
 
 # =====================================================
 # STAGE 2: BUILD
@@ -52,12 +50,13 @@ COPY backend/package*.json ./
 COPY backend/ .
 
 # Copiar certificados (se existirem)
-COPY certificates ./certs-temp
+COPY certificates ./certs-temp 2>/dev/null || true
 
-# Executar script de certificados
-COPY backend/copy_cert_assets.sh ./
-RUN chmod +x copy_cert_assets.sh && \
-    ./copy_cert_assets.sh || true && \
+# Executar script de certificados (se existir)
+RUN if [ -f copy_cert_assets.sh ]; then \
+        chmod +x copy_cert_assets.sh && \
+        ./copy_cert_assets.sh || true; \
+    fi && \
     rm -rf ./certs-temp
 
 # Build da aplicação TypeScript
@@ -88,7 +87,10 @@ COPY --from=build /app/dist ./dist
 
 # Copiar arquivos necessários
 COPY --from=build /app/package*.json ./
-COPY --from=build /app/certs ./certs
+
+# Copiar certificados (se existirem)
+RUN mkdir -p /app/certs
+COPY --from=build /app/certs ./certs 2>/dev/null || true
 
 # Copiar e preparar entrypoint
 COPY backend/docker-entrypoint.sh /app/docker-entrypoint.sh
